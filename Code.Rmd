@@ -1,0 +1,128 @@
+---
+title: "Untitled"
+author: "Victor"
+date: "2023-05-05"
+output: html_document
+---
+
+Deployment: Model-agnostic methods
+Exercise 5.- Model-agnostic: Partial Dependency Plot (PDP).
+Remember: this exercise must have version-control using git and backup support through github. In this task, you only have to upload the link to the repository generated using git orders. It must also contain the report with the comments and the answers to the questions raised in this exercise.
+
+```{r, include = F}
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(lubridate)
+library(randomForest)
+library(pdp)
+library(vip)
+library(tictoc)
+```
+
+1.- One dimensional Partial Dependence Plot.
+The partial dependence plot shows the marginal effect of a feature on the predicted outcome of a previously fit model. 
+ 
+EXERCISE:
+Apply PDP to the regression example of predicting bike rentals. Fit a random forest approximation for the prediction of bike rentals (cnt). Use the partial dependence plot to visualize the relationships the model learned. Use the slides shown in class as model.  
+
+```{r}
+days <- read.csv("day.csv")
+hours <- read.csv("hour.csv")
+days$dteday <- as_date(days$dteday) # pasamos de caracter a fecha 
+
+datmod <- select(days, workingday, holiday, temp, hum, windspeed, cnt)
+datmod$days_since_2011 <- int_length(interval(ymd("2011-01-01"), days$dteday)) / (3600*24)
+
+datmod$winter <- ifelse(days$season==1, 1, 0)
+datmod$summer <- ifelse(days$season==3, 1, 0)
+datmod$fall <- ifelse(days$season==4, 1, 0)
+datmod$MISTY <- ifelse(days$weathersit == 2, 1, 0)
+datmod$RAIN <- ifelse(days$weathersit == 3 | days$weathersit == 4, 1, 0)
+
+datmod$temp <- days$temp * (39-(-8)) - 8
+datmod$hum <- days$hum * 100
+datmod$windspeed <- days$windspeed * 67
+
+days_rf <- randomForest(cnt ~ ., data = datmod, importance = TRUE)
+pred.vars <- c("days_since_2011", "temp", "hum", "windspeed")
+plot_list <- list()
+
+for (var in pred.vars) {
+  p <- partial(days_rf, pred.var = var, plot = TRUE, rug = TRUE, plot.engine = "ggplot2")
+  plot_list[[var]] <- p
+}
+
+subplot(plot_list, shareX = FALSE, titleX = TRUE)
+```
+
+QUESTION:
+Analyse the influence of days since 2011, temperature, humidity and wind speed on the predicted bike counts.
+
+ANSWER:
+As we can see in the 'days since 2011' graphs, it influences the number of rented bicycles, where each day that passes more bicycles are rented, until a peak is reached, after which the number of rented bicycles begins to decline. Regarding the temperature, we see that the number of rented bicycles significantly increases for each degree that the temperature increases, until it reaches 24 degrees, after which the heat causes fewer bicycles to be rented. As for humidity and wind speed, in both cases, as they increase, the number of rented bicycles decreases drastically.
+
+2.- Bidimensional Partial Dependency Plot.
+EXERCISE:
+Generate a 2D Partial Dependency Plot with humidity and temperature to predict the number of bikes rented depending on those parameters.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot. 
+
+Show the density distribution of both input features with the 2D plot as shown in the class slides. 
+
+TIP: Use geom_tile() to generate the 2D plot. Set width and height to avoid holes. 
+
+```{r}
+sampled <- sample_n(datmod, 40) 
+
+temphum <- inner_join(data.frame(sampled$temp), data.frame(sampled$hum), by=character()) 
+colnames(temphum) <- c("temperature","humidity")
+
+temphum$prob <- 0 
+for(i in 1:nrow(temphum)){
+r <- datmod
+r[["temp"]] <- temphum[["temperature"]][i]
+r[["hum"]] <- temphum[["humidity"]][i]
+pred <- predict(days_rf, r) 
+temphum[["prob"]][i] <- sum(pred) / nrow(datmod) 
+}
+
+ggplot(temphum, aes(x=temperature, y=humidity)) + geom_tile(aes(fill=prob, width=10, height=10)) + labs(x="Temperature", y="Humidity") + guides(fill=guide_legend(title="Number of bikes")) + geom_rug()
+```
+
+QUESTION:
+Interpret the results.
+
+As we can see in the plot, when the temperature is low no more than 4000 bikes are rented, whatever it is the humidity. As the temperature increase the number of bikes rented increases too, reaching a peak of bikes rented when the temperature is between 15 and 25 degrees and the humidity between 0 and 60, where the bikes rented are more than 5000. If the temperature is higher than 25 degrees  and the humidity higher than 60, the number of bikes rented is lower.
+
+3.- PDP to explain the price of a house.
+EXERCISE:
+Apply the previous concepts to predict the price of a house from the database kc_house_data.csv. In this case, use again a random forest approximation for the prediction based on the features bedrooms, bathrooms, sqft_living, sqft_lot, floors and yr_built. 
+Use the partial dependence plot to visualize the relationships the model learned.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot. 
+
+QUESTION:
+Analyse the influence of bedrooms, bathrooms, sqft_living and floors on the predicted price.
+
+```{r}
+house <- read.csv("kc_house_data.csv")
+
+sample_house <- sample_frac(house, 0.2)
+sample_house <- select(sample_house, bedrooms, bathrooms, sqft_living, sqft_lot, floors, yr_built, price)
+
+house_rf <- randomForest(price ~ ., data = sample_house, importance = TRUE)
+pred.vars <- c("bedrooms", "bathrooms", "sqft_living", "floors")
+plot_list <- list()
+
+for (var in pred.vars) {
+  p <- partial(house_rf, pred.var = var, plot = TRUE, rug = TRUE, plot.engine = "ggplot2")
+  plot_list[[var]] <- p
+}
+
+subplot(plot_list, shareX = FALSE, titleX = TRUE)
+```
+
+ANSWER:
+As we can see in the graphs, the more rooms, bathrooms, square meters and floors the apartment has, the higher its price will be. It's logical.
+In all graphs, it is observed that the price increases as the number of bathrooms, square meters, and floors increases. However, the graph for the number of rooms indicates that the price of a house increases if it goes from having 1 to 2 rooms, but from there, the price decreases as the number of rooms increases, which is very strange and I believe it's due to the trend not being captured correctly.
